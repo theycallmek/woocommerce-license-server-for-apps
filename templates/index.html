@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SWADbot Active Sessions</title>
+    <!-- Refreshes page every 10 seconds -->
+    <meta http-equiv="refresh" content="10">
+
+</head>
+<body>
+    <h2>{{ session_count }} ACTIVE USERS </h2>
+        {% for session in active_sessions.values() %}
+            # {{ loop.index }}<br>
+            <b>IP:</b> {{ session.ip }}<br>
+            <b>USERNAME:</b> {{ session.username }}<br>
+            <b>USER ID:</b> {{ session.user_id }}<br>
+            <b>SOCKET ID:</b> {{ session.sid }}<br>
+            <b>TOKEN:</b> {{ session.token[:16] }}...{{ session.token[-43:] }}<br>
+            <b>PRODUCT ID:</b> {{ session.product_id }}<br>
+            <b>MASTER API KEY:</b> {{ session.master_api_key }}<br>
+            <b>THIS SESSION:</b> {{ session.this_session }}<p>
+        {% endfor %}
+    <h2>LOGS:</h2>
+    {% for log in connection_log %}
+        {{ log }}<br>
+    {% endfor %}
+</body>
+</html>

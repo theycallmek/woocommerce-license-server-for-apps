@@ -1,0 +1,10 @@
+httpx
+aioconsole
+PyJWT
+Jinja2
+aiohttp-jinja2
+aiohttp
+python-socketio>=5.8.0
+gunicorn
+
+# httpx aioconsole PyJWT Jinja2 aiohttp-jinja2 aiohttp python-socketio gunicorn
