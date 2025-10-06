@@ -3,7 +3,7 @@ import os
 import platform
 from datetime import datetime, timedelta
 from typing import Optional
-import mysql.connector
+# import mysql.connector
 import logging
 import hmac
 import hashlib
@@ -367,7 +367,7 @@ async def license_api(
         create_date=datetime.now(),
         last_access=datetime.now(),
     )
-    
+
     if action == "activate":
         await client_session_write(client_session)
     elif action == "status":
@@ -428,7 +428,7 @@ async def deactivate_expired_sessions() -> None:
     while True:
         async with AsyncSession(pg_engine) as session:
             statement = select(UserSession).where(
-                UserSession.last_access < datetime.now() - timedelta(seconds=50)
+                UserSession.last_access < datetime.now() - timedelta(seconds=10)
             )
             results = await session.execute(statement)
             for client_session in results.scalars():
@@ -442,7 +442,7 @@ async def deactivate_expired_sessions() -> None:
                 )
                 logging.debug(f"DEACTIVATED SESSION: {client_session}")
                 await client_session_delete(client_session)
-        await asyncio.sleep(10)
+        await asyncio.sleep(5)
 
 
 async def client_session_delete(client_session: UserSession) -> None:
