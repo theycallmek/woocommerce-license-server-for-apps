@@ -7,14 +7,15 @@ import mysql.connector
 import logging
 import hmac
 import hashlib
-
+import base64
+import bcrypt
 import dotenv
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from passlib.hash import phpass, bcrypt
+from passlib.hash import phpass
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlmodel import (
     Field,
@@ -153,12 +154,10 @@ class UserSession(SQLModel, table=True):
 
 class TokenData(SQLModel):
     token: str
-    id: int
-    email: str
-    nicename: str
-    firstName: str
-    lastName: str
-    displayName: str
+    user_id: int
+    user_email: str
+    user_nicename: str
+    user_display_name: str
 
 
 class LicenseResponse(SQLModel):
@@ -176,17 +175,11 @@ class Logs(SQLModel, table=True):
     message: str
     create_date: Optional[datetime] = Field(default=datetime.now(), index=True)
 
-    def __init__(self, username: str, ip: str, message: str):
-        self.username = username
-        self.ip = ip
-        self.message = message
-        self.create_date = datetime.now()
-        asyncio.create_task(pg_logging(self))
-
-
-async def pg_logging(log: Logs):
+async def create_log_entry(username: str, ip: str, message: str):
+    """Creates a log entry and saves it to the database asynchronously."""
+    log_entry = Logs(username=username, ip=ip, message=message)
     async with AsyncSession(pg_engine) as session:
-        session.add(log)
+        session.add(log_entry)
         await session.commit()
 
 
@@ -219,53 +212,37 @@ async def get_token_data(username: str, password: str) -> dict | None:
         return None
 
 
-def wp_pre_hash(password: bytes) -> bytes:
-    """Implements the WordPress >= 6.8 password pre-hashing."""
-    hmac_sha384 = hmac.new('wp-sha384'.encode('utf-8'), digestmod=hashlib.sha384)
-    hmac_sha384.update(password)
-    return hmac_sha384.digest()
-
-
 def verify_pw_hash(pw: str, pw_hash: str) -> bool:
     """
-    Verifies a password against a WordPress hash, supporting both the new
-    (>= 6.8) HMAC-SHA384+bcrypt format and the older phpass format.
+    Verifies a plaintext password against a modern WordPress hash
+    that starts with '$wp'.
     """
-    logging.debug(f"Inside verify_pw_hash. Received hash: '{pw_hash}'")
-    clean_hash = pw_hash.strip()
-    logging.debug(f"Cleaned hash: '{clean_hash}'")
+    if not isinstance(pw_hash, str) or not pw_hash.startswith('$wp$'):
+        # This function is only for modern WordPress hashes.
+        return False
 
-    # Check for the new WordPress >= 6.8 format
-    if clean_hash.startswith("$wp$"):
-        logging.debug("WordPress >= 6.8 hash detected. Applying pre-hashing verification.")
-        
-        actual_bcrypt_hash = clean_hash[3:]
-        logging.debug(f"Actual bcrypt hash part: '{actual_bcrypt_hash}'")
+    if len(pw) > 4096:
+        return False
 
-        # 1. Pre-hash the incoming plaintext password
-        pre_hashed_pw_bytes = wp_pre_hash(pw.encode('utf-8'))
+    # The bcrypt library expects the hash without the '$wp$' prefix.
+    # It also requires both the password and hash to be bytes.
+    password_bytes = pw.encode('utf-8')
+    logging.debug(f"pw_hash: {pw_hash}")
+    bcrypt_hash_bytes = pw_hash[3:].encode('utf-8')
 
-        # 2. Hex-encode the binary digest to prevent bcrypt null-byte issues
-        pre_hashed_pw_hex = pre_hashed_pw_bytes.hex()
-        logging.debug(f"Pre-hashed password (hex-encoded): {pre_hashed_pw_hex}")
+    # Step 1: For modern '$wp$' hashes, WordPress first pre-hashes the password
+    # using HMAC-SHA384 before passing it to bcrypt. We must replicate this.
+    password_to_verify = base64.b64encode(
+        hmac.new(
+            b'wp-sha384',
+            password_bytes,
+            hashlib.sha384
+        ).digest()
+    )
 
-        try:
-            # 3. Verify the hex-encoded pre-hash against the DB hash
-            verified = bcrypt.verify(pre_hashed_pw_hex, actual_bcrypt_hash)
-            logging.debug(f"Bcrypt verification result: {verified}")
-            return verified
-        except Exception as e:
-            logging.error(f"Error during bcrypt verification: {e}")
-            return False
-            
-    # Fallback to the older phpass format
-    else:
-        logging.debug("Older WordPress hash format detected. Attempting verification using phpass.")
-        try:
-            return phpass.verify(pw, clean_hash)
-        except ValueError:
-            logging.warning("phpass verification failed for unknown hash format.")
-            return False
+    # Step 2: Use bcrypt's checkpw to securely compare the pre-hashed password
+    # with the bcrypt portion of the database hash.
+    return bcrypt.checkpw(password_to_verify, bcrypt_hash_bytes)
 
 
 app = FastAPI()
@@ -323,12 +300,21 @@ async def login(
         verified = False
     if verified:
         token_data = await get_token_data(user_login, user_pass)
-        Logs(username=user_login, ip=client_ip, message="Login successful!")
-    else:
-        Logs(username=user_login, ip=client_ip, message="Login failed!")
-        return JSONResponse(status_code=401, content={"message": "Login failed"})
-    return token_data
+        if token_data:
+            # Construct the response object to match the TokenData model
+            response_data = TokenData(
+                token=token_data["token"],
+                user_id=data.ID,  # Get the ID from the database user object
+                user_email=token_data["user_email"],
+                user_nicename=token_data["user_nicename"],
+                user_display_name=token_data["user_display_name"],
+            )
+            await create_log_entry(username=user_login, ip=client_ip, message="Login successful!")
+            return response_data
 
+    # This block is reached if verification fails or if token fetching fails
+    await create_log_entry(username=user_login, ip=client_ip, message="Login failed!")
+    return JSONResponse(status_code=401, content={"message": "Login failed"})
 
 @app.post("/license/{action}")
 async def license_api(

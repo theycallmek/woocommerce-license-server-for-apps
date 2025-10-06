@@ -1,3 +1,4 @@
+bcrypt
 gunicorn>=20.1.0
 httpx>=0.24.0
 PyJWT>=2.6.0

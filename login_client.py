@@ -9,7 +9,7 @@ dotenv.load_dotenv()
 
 USERNAME = "test1"
 PASSWORD = "swadbotpass123"
-# unused for now
+# This is the password required by the JWT plugin
 # APP_PASSWORD = "ZgKzpENVHMBnjouSDPNRmP6o"
 
 #URL = "https://fastapi-license-server-meh3ibmmpq-uc.a.run.app"
@@ -34,11 +34,11 @@ client_ip = get_my_ip()
 def main():
     print("RUNNING MAIN")
     # POST to /login
-    with httpx.Client() as client:
+    with httpx.Client(timeout=20) as client:
         response = client.post(
             url=f"{URL}/login",
+            # Use the Application Password for the JWT plugin
             params={"user_login": USERNAME, "user_pass": PASSWORD},
-            timeout=10,
         )
     if response.status_code != 200:
         print(f"response.status_code: {response.status_code}")
@@ -49,8 +49,8 @@ def main():
 
     # POST to /license/activate
     params = {
-        "username": token_data["nicename"],
-        "client_id": token_data["id"],
+        "username": token_data["user_nicename"],
+        "client_id": token_data["user_id"],
         "token": token_data["token"],
         "session_id": this_session,
         "client_ip": client_ip
