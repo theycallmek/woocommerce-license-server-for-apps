@@ -9,6 +9,9 @@ dotenv.load_dotenv()
 
 USERNAME = "test1"
 PASSWORD = "swadbotpass123"
+# unused for now
+# APP_PASSWORD = "ZgKzpENVHMBnjouSDPNRmP6o"
+
 #URL = "https://fastapi-license-server-meh3ibmmpq-uc.a.run.app"
 URL = 'http://127.0.0.1:8000'
 
@@ -35,7 +38,7 @@ def main():
         response = client.post(
             url=f"{URL}/login",
             params={"user_login": USERNAME, "user_pass": PASSWORD},
-            timeout=20,
+            timeout=10,
         )
     if response.status_code != 200:
         print(f"response.status_code: {response.status_code}")
@@ -67,7 +70,8 @@ def main():
         time.sleep(15)
         # POST to /license/status
         with httpx.Client() as client:
-            params["token"] = params["token"] + "0"
+            # params["token"] = params["token"] + "0"
+            params["token"] = params["token"]
             response = client.post(
                 url=f"{URL}/license/status", params=params, timeout=20
             )

@@ -3,6 +3,10 @@ import os
 import platform
 from datetime import datetime, timedelta
 from typing import Optional
+import mysql.connector
+import logging
+import hmac
+import hashlib
 
 import dotenv
 import httpx
@@ -10,7 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from passlib.hash import phpass
+from passlib.hash import phpass, bcrypt
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlmodel import (
     Field,
@@ -25,20 +29,22 @@ from sqlmodel import (
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 dotenv.load_dotenv()
+
 WP_URI = (
-    f'mysql+pymysql://{os.environ["WP_MYSQL_USER"]}'
+    f'mysql+mysqlconnector://{os.environ["WP_MYSQL_USER"]}'
     f':{os.environ["WP_MYSQL_PASS"]}'
     f'@{os.environ["WP_MYSQL_HOST"]}'
     f':{os.environ["WP_MYSQL_PORT"]}'
     f'/{os.environ["WP_MYSQL_DB_NAME"]}'
 )
+print(f'WP_URI: {WP_URI}')
 PG_URI = (
     f'postgresql+asyncpg://{os.environ["PG_USER"]}'
     f':{os.environ["PG_PASSWORD"]}'
     f'@{os.environ["PG_HOST"]}'
     f'/{os.environ["PG_DB_NAME"]}'
 )
-
+print(f'PG_URI: {PG_URI}')
 
 def get_wp_mysql_engine() -> engine:
     return create_engine(url=WP_URI, echo=False)
@@ -175,10 +181,10 @@ class Logs(SQLModel, table=True):
         self.ip = ip
         self.message = message
         self.create_date = datetime.now()
-        asyncio.create_task(logging(self))
+        asyncio.create_task(pg_logging(self))
 
 
-async def logging(log: Logs):
+async def pg_logging(log: Logs):
     async with AsyncSession(pg_engine) as session:
         session.add(log)
         await session.commit()
@@ -196,22 +202,70 @@ def get_wp_user_data(username: str) -> WPUsers:
 
 
 async def get_token_data(username: str, password: str) -> dict | None:
+    # auth_endpoint = "https://swadbot.com/wp-json/jwt-auth/v1/token"
     auth_endpoint = "https://swadbot.com/wp-json/jwt-auth/v1/token"
+
     payload = {"username": username, "password": password}
     async with httpx.AsyncClient() as client:
         response = await client.post(auth_endpoint, json=payload, timeout=10)
     if response.status_code == 200:
-        return response.json()["data"]
+        logging.debug(f'TOKEN DATA: {response.json()}')
+        return response.json()
     elif response.status_code == 403:
-        print(f'Error 403: {response.json()["message"]}')
+        logging.debug(f'Error 403: {response.json()["message"]}')
         return None
     else:
-        print(f'Error: {response.json()["message"]}')
+        logging.debug(f'Error: {response.json()["message"]}')
         return None
+
+
+def wp_pre_hash(password: bytes) -> bytes:
+    """Implements the WordPress >= 6.8 password pre-hashing."""
+    hmac_sha384 = hmac.new('wp-sha384'.encode('utf-8'), digestmod=hashlib.sha384)
+    hmac_sha384.update(password)
+    return hmac_sha384.digest()
 
 
 def verify_pw_hash(pw: str, pw_hash: str) -> bool:
-    return phpass.verify(pw, pw_hash)
+    """
+    Verifies a password against a WordPress hash, supporting both the new
+    (>= 6.8) HMAC-SHA384+bcrypt format and the older phpass format.
+    """
+    logging.debug(f"Inside verify_pw_hash. Received hash: '{pw_hash}'")
+    clean_hash = pw_hash.strip()
+    logging.debug(f"Cleaned hash: '{clean_hash}'")
+
+    # Check for the new WordPress >= 6.8 format
+    if clean_hash.startswith("$wp$"):
+        logging.debug("WordPress >= 6.8 hash detected. Applying pre-hashing verification.")
+        
+        actual_bcrypt_hash = clean_hash[3:]
+        logging.debug(f"Actual bcrypt hash part: '{actual_bcrypt_hash}'")
+
+        # 1. Pre-hash the incoming plaintext password
+        pre_hashed_pw_bytes = wp_pre_hash(pw.encode('utf-8'))
+
+        # 2. Hex-encode the binary digest to prevent bcrypt null-byte issues
+        pre_hashed_pw_hex = pre_hashed_pw_bytes.hex()
+        logging.debug(f"Pre-hashed password (hex-encoded): {pre_hashed_pw_hex}")
+
+        try:
+            # 3. Verify the hex-encoded pre-hash against the DB hash
+            verified = bcrypt.verify(pre_hashed_pw_hex, actual_bcrypt_hash)
+            logging.debug(f"Bcrypt verification result: {verified}")
+            return verified
+        except Exception as e:
+            logging.error(f"Error during bcrypt verification: {e}")
+            return False
+            
+    # Fallback to the older phpass format
+    else:
+        logging.debug("Older WordPress hash format detected. Attempting verification using phpass.")
+        try:
+            return phpass.verify(pw, clean_hash)
+        except ValueError:
+            logging.warning("phpass verification failed for unknown hash format.")
+            return False
 
 
 app = FastAPI()
@@ -221,11 +275,13 @@ app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
 @app.on_event("startup")
 async def startup():
+    logging.debug("STARTING UP")
     asyncio.create_task(deactivate_expired_sessions())
 
 
 @app.get("/admin/{password}", response_class=HTMLResponse)
 async def admin(request: Request, password: str):
+    logging.debug(f"PASSWORD: {password}")
     if password == "password":
         active_users = await get_active_users()
         logs = await get_logs_from_db(100)
@@ -239,10 +295,13 @@ async def admin(request: Request, password: str):
 
 @app.get("/")
 async def root(request: Request):
+    logging.debug("ROOT")
     try:
         client_ip = request.headers["X-Forwarded-For"]
+        logging.debug(f"client ip={client_ip}")
     except KeyError:
         client_ip = request.client.host
+        logging.debug(f"Caught KeyError: client ip={client_ip}")
     return {"message": "Welcome sensei!", "ip": client_ip}
 
 
@@ -250,15 +309,17 @@ async def root(request: Request):
 async def login(
     request: Request, user_login: str, user_pass: str
 ) -> dict | JSONResponse:
+    logging.debug("LOGIN")
     data = get_wp_user_data(user_login)
     try:
         client_ip = request.headers["X-Forwarded-For"]
     except KeyError:
         client_ip = request.client.host
     try:
+        logging.debug(f"HASH FROM DB: {data.user_pass}")
         verified = verify_pw_hash(user_pass, data.user_pass)
     except AttributeError as e:
-        print(f"CAUGHT ATTRIBUTE ERROR: {e}")
+        logging.debug(f"CAUGHT ATTRIBUTE ERROR: {e}")
         verified = False
     if verified:
         token_data = await get_token_data(user_login, user_pass)
@@ -294,7 +355,7 @@ async def license_api(
             )
     url = "https://swadbot.com/"
     api_data = await get_wp_api_resource_data(client_id)
-    # print(f'API_DATA: {api_data}')
+    # logging.debug(f'API_DATA: {api_data}')
     try:
         prod_id = api_data.product_id
     except KeyError:
@@ -350,7 +411,7 @@ async def license_api(
             )
             return None
         json_data = response.json()
-        # print(f'JSON_DATA: {json_data}')
+        # logging.debug(f'JSON_DATA: {json_data}')
 
     ar = LicenseResponse(
         success=True, message="", total_activations=0, activations_remaining=0
@@ -393,7 +454,7 @@ async def deactivate_expired_sessions() -> None:
                     session_id=client_session.this_session,
                     client_ip=client_session.ip,
                 )
-                print(f"DEACTIVATED SESSION: {client_session}")
+                logging.debug(f"DEACTIVATED SESSION: {client_session}")
                 await client_session_delete(client_session)
         await asyncio.sleep(10)
 
@@ -405,7 +466,7 @@ async def client_session_delete(client_session: UserSession) -> None:
         )
         await session.execute(statement)
         await session.commit()
-    # print(f'DELETED SESSION FROM DB: {client_session}')
+    # logging.debug(f'DELETED SESSION FROM DB: {client_session}')
 
 
 async def client_session_update(client_session: UserSession) -> None:
@@ -417,7 +478,7 @@ async def client_session_update(client_session: UserSession) -> None:
         )
         await session.execute(statement)
         await session.commit()
-    # print(f'UPDATED SESSION IN DB: {client_session}')
+    # logging.debug(f'UPDATED SESSION IN DB: {client_session}')
 
 
 async def client_session_write(client_session: UserSession) -> None:
@@ -425,7 +486,7 @@ async def client_session_write(client_session: UserSession) -> None:
         session.add(client_session)
         await session.commit()
         await session.refresh(client_session)
-    # print(f'WROTE SESSION TO DB: {client_session}')
+    # logging.debug(f'WROTE SESSION TO DB: {client_session}')
 
 
 async def get_wp_api_resource_data(user_id: int) -> WPWCAMApiResource:
@@ -434,7 +495,7 @@ async def get_wp_api_resource_data(user_id: int) -> WPWCAMApiResource:
             WPWCAMApiResource.user_id == user_id
         )
         results = session.exec(statement).first()
-    # print(f'F_RESULTS: {results}')
+    # logging.debug(f'F_RESULTS: {results}')
     return results
 
 
@@ -449,7 +510,7 @@ async def get_wp_api_activations_data(
             )
             results = session.exec(statement).first()
             total_results.append(results)
-    # print(f'TOTAL_RESULTS: {total_results}')
+    # logging.debug(f'TOTAL_RESULTS: {total_results}')
     return total_results
 
 
@@ -491,6 +552,47 @@ def run():
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
-if __name__ != "__main__":
-    # NOT EQUALS!
+def test_get_token_data(username: str, password: str) -> dict | None:
+    # auth_endpoint = "https://swadbot.com/wp-json/jwt-auth/v1/token"
+    auth_endpoint = "https://swadbot.com/wp-json/jwt-auth/v1/token"
+
+    payload = {"username": username, "password": password}
+    with httpx.Client() as client:
+        response = client.post(auth_endpoint, json=payload, timeout=10)
+    if response.status_code == 200:
+        logging.debug(f'TOKEN DATA: {response.json()}')
+        return response.json()
+    elif response.status_code == 403:
+        logging.debug(f'Error 403: {response.json()["message"]}')
+        return None
+    else:
+        logging.debug(f'Error: {response.json()["message"]}')
+        return None
+
+def login_test(user_login: str, user_pass: str) -> dict | JSONResponse:
+    logging.debug("LOGIN")
+    data = get_wp_user_data(user_login)
+    client_ip = '127.0.0.1'
+    try:
+        verified = verify_pw_hash(user_pass, data.user_pass)
+    except AttributeError as e:
+        logging.debug(f"CAUGHT ATTRIBUTE ERROR: {e}")
+        verified = False
+    if verified:
+        token_data = test_get_token_data(user_login, user_pass)
+        Logs(username=user_login, ip=client_ip, message="Login successful!")
+    else:
+        Logs(username=user_login, ip=client_ip, message="Login failed!")
+        return JSONResponse(status_code=401, content={"message": "Login failed"})
+    return token_data
+
+if __name__ == "__main__":
+    USERNAME = 'test1'
+    PASSWORD = 'swadbotpass123'
+
+    print("name = __main__")
+    login_test(USERNAME, PASSWORD)
+
+else: # NOT EQUALS to run when ran through uvicorn etc
+    print("name != __main__")
     run()
