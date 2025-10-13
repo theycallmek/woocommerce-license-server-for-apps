@@ -9,7 +9,7 @@ passlib>=1.7.4
 sqlalchemy<2.0.0
 py-machineid>=0.3.0
 pymysql>=1.0.3
-asyncpg>=0.27.0
+aiosqlite>=0.19.0
 uvicorn>=0.20.0
 jinja2>=3.1.2
 # httpx aioconsole PyJWT Jinja2 aiohttp-jinja2 aiohttp python-socketio gunicorn python-dotenv SQLAlchemy cloud-sql-python-connector sqlmodel fastapi

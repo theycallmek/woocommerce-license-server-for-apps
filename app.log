@@ -27679,3 +27679,10 @@ TRACE:    2025-10-12 00:45:52,522 - 127.0.0.1:49684 - ASGI [40] Send {'type': 'h
 TRACE:    2025-10-12 00:45:52,523 - 127.0.0.1:49684 - ASGI [40] Completed
 TRACE:    2025-10-12 00:45:57,524 - 127.0.0.1:49684 - HTTP connection lost
 TRACE:    2025-10-12 00:45:57,524 - 127.0.0.1:49684 - HTTP connection lost
+INFO:     2025-10-13 18:06:43,790 - Will watch for changes in these directories: ['/app']
+INFO:     2025-10-13 18:06:43,790 - Will watch for changes in these directories: ['/app']
+INFO:     2025-10-13 18:06:43,791 - Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     2025-10-13 18:06:43,791 - Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     2025-10-13 18:06:43,792 - Started reloader process [2420] using StatReload
+INFO:     2025-10-13 18:06:43,792 - Started reloader process [2420] using StatReload
+DEBUG:    2025-10-13 18:06:44,144 - Using selector: EpollSelector

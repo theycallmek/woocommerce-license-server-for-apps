@@ -39,24 +39,18 @@ WP_URI = (
     f'/{os.environ["WP_MYSQL_DB_NAME"]}'
 )
 print(f'WP_URI: {WP_URI}')
-PG_URI = (
-    f'postgresql+asyncpg://{os.environ["PG_USER"]}'
-    f':{os.environ["PG_PASSWORD"]}'
-    f'@{os.environ["PG_HOST"]}'
-    f'/{os.environ["PG_DB_NAME"]}'
-)
-print(f'PG_URI: {PG_URI}')
+SQLITE_URI = "sqlite+aiosqlite:///database.db"
 
 def get_wp_mysql_engine() -> engine:
     return create_engine(url=WP_URI, echo=False)
 
 
-def get_pg_engine() -> AsyncEngine:
-    return create_async_engine(url=PG_URI, echo=False)
+def get_sqlite_engine() -> AsyncEngine:
+    return create_async_engine(url=SQLITE_URI, echo=False)
 
 
 wp_engine = get_wp_mysql_engine()  # Connects to WordPress MySQL
-pg_engine = get_pg_engine()  # Connects to dedicated PostgresSQL
+sqlite_engine = get_sqlite_engine()  # Connects to dedicated SQLite
 
 
 def get_my_ip():
@@ -178,7 +172,7 @@ class Logs(SQLModel, table=True):
 async def create_log_entry(username: str, ip: str, message: str):
     """Creates a log entry and saves it to the database asynchronously."""
     log_entry = Logs(username=username, ip=ip, message=message)
-    async with AsyncSession(pg_engine) as session:
+    async with AsyncSession(sqlite_engine) as session:
         session.add(log_entry)
         await session.commit()
 
@@ -250,9 +244,15 @@ templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
 
+async def create_db_and_tables():
+    async with sqlite_engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+
 @app.on_event("startup")
 async def startup():
     logging.debug("STARTING UP")
+    await create_db_and_tables()
     asyncio.create_task(deactivate_expired_sessions())
 
 
@@ -290,7 +290,7 @@ async def deactivate_session_admin(session_id: str, payload: DeactivateRequest):
         return JSONResponse(status_code=401, content={"message": "Unauthorized"})
 
     # Find the session by its unique string ID ('this_session'), not the integer primary key ('id')
-    async with AsyncSession(pg_engine) as session:
+    async with AsyncSession(sqlite_engine) as session:
         statement = select(UserSession).where(UserSession.this_session == session_id)
         client_session = (await session.execute(statement)).scalar_one_or_none()
 
@@ -379,7 +379,7 @@ async def license_api(
             client_ip = request.client.host
     else:
         # Called internally from timeout or admin deactivate, get IP from the stored session
-        async with AsyncSession(pg_engine) as session:
+        async with AsyncSession(sqlite_engine) as session:
             db_session = (await session.execute(select(UserSession).where(UserSession.this_session == session_id))).scalar_one_or_none()
             client_ip = db_session.ip if db_session else "unknown"
 
@@ -487,7 +487,7 @@ async def license_api(
 
 async def deactivate_expired_sessions() -> None:
     while True:
-        async with AsyncSession(pg_engine) as session:
+        async with AsyncSession(sqlite_engine) as session:
             statement = select(UserSession).where(
                 UserSession.last_access < datetime.now() - timedelta(seconds=10)
             )
@@ -508,7 +508,7 @@ async def deactivate_expired_sessions() -> None:
 
 
 async def client_session_delete(client_session: UserSession) -> None:
-    async with AsyncSession(pg_engine) as session:
+    async with AsyncSession(sqlite_engine) as session:
         statement = delete(UserSession).where(
             UserSession.this_session == client_session.this_session
         )
@@ -518,7 +518,7 @@ async def client_session_delete(client_session: UserSession) -> None:
 
 
 async def client_session_update(client_session: UserSession) -> None:
-    async with AsyncSession(pg_engine) as session:
+    async with AsyncSession(sqlite_engine) as session:
         statement = (
             update(UserSession)
             .where(UserSession.this_session == client_session.this_session)
@@ -530,7 +530,7 @@ async def client_session_update(client_session: UserSession) -> None:
 
 
 async def client_session_write(client_session: UserSession) -> None:
-    async with AsyncSession(pg_engine) as session:
+    async with AsyncSession(sqlite_engine) as session:
         session.add(client_session)
         await session.commit()
         await session.refresh(client_session)
@@ -563,7 +563,7 @@ async def get_wp_api_activations_data(
 
 
 async def check_last_create_date(client_id: int) -> bool:
-    async with AsyncSession(pg_engine) as session:
+    async with AsyncSession(sqlite_engine) as session:
         statement = (
             select(UserSession)
             .where(UserSession.user_id == client_id)
@@ -576,7 +576,7 @@ async def check_last_create_date(client_id: int) -> bool:
 
 
 async def get_active_users() -> list[UserSession]:
-    async with AsyncSession(pg_engine) as session:
+    async with AsyncSession(sqlite_engine) as session:
         statement = select(UserSession)
         results = await session.execute(statement)
         final_list = []
@@ -586,7 +586,7 @@ async def get_active_users() -> list[UserSession]:
 
 
 async def get_logs_from_db(limit: int) -> list[Logs]:
-    async with AsyncSession(pg_engine) as session:
+    async with AsyncSession(sqlite_engine) as session:
         statement = select(Logs).order_by(Logs.create_date.desc()).limit(limit)
         results = await session.execute(statement)
         final_list = []
