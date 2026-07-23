@@ -7,12 +7,9 @@ import machineid
 
 dotenv.load_dotenv()
 
-USERNAME = "test1"
-PASSWORD = "swadbotpass123"
-# This is the password required by the JWT plugin
-# APP_PASSWORD = "ZgKzpENVHMBnjouSDPNRmP6o"
-
-#URL = "https://fastapi-license-server-meh3ibmmpq-uc.a.run.app"
+USERNAME = "example_username"
+PASSWORD = "example_password"
+# FastAPI Server URL
 URL = 'http://127.0.0.1:8000'
 
 
