@@ -6,7 +6,7 @@ A robust and secure middleware server built with FastAPI that acts as a bridge b
 ![Python](https://img.shields.io/badge/Python-3.11+-blue?style=for-the-badge&logo=python)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker)
 
-NOTE: This was a project I never intended on releasing publicly. So there are some things like naming conventions that will be tailored towards me. Make sure to check out the developer guide at the bottom. I am not a professional developer. I do this as a hobby so there may be errors or bugs. Please feel free to submit a pull request! All contributions are more than welcome.
+NOTE: This was a project I never intended on releasing publicly. So there are some things like naming conventions that will be tailored towards me. Make sure to check out the developer guide at the bottom. If you find any bugs or errors please feel free to submit a pull request or an issue. All contributions are more than welcome!
 
 ---
 
@@ -64,8 +64,8 @@ Follow these steps to get the server running locally.
 ### 1. Clone the Repository
 
 ```sh
-git clone theycallmek/woocommerce-license-server-for-apps
-cd websocket_test
+git clone https://github.com/theycallmek/woocommerce-license-server-for-apps
+cd woocommerce-license-server-for-apps
 ```
 
 ### 2. Install Dependencies
