@@ -1,6 +1,6 @@
 # FastAPI WordPress Auth & License Middleware 🚀
 
-A robust and secure middleware server built with FastAPI that acts as a bridge between a client application and a WordPress backend. It handles user authentication via encrypted password hash and JWT token, license validation against WooCommerce API Manager (WC-AM), and persistent session management.
+A robust and secure middleware server built with FastAPI that acts as a bridge between a client application via websocket connection and a WordPress backend. It handles user authentication via encrypted password hash and JWT token, license validation against WooCommerce API Manager, and persistent session management for multiple floating licenses per client.
 
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi)
 ![Python](https://img.shields.io/badge/Python-3.11+-blue?style=for-the-badge&logo=python)
