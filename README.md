@@ -56,6 +56,7 @@ Follow these steps to get the server running locally.
 - A running PostgreSQL database
 
 ### Wordpress Plugin Prerequisites
+- [RoyalAuth](https://github.com/theycallmek/woocommerce-license-server-for-apps/tree/main/Plugin/royal-auth) (Part of this project)
 - [Kestrel API Manager for WooCommerce](https://woocommerce.com/document/api-documentation/)
 - [JWT Authentication for WP REST API](https://wordpress.org/plugins/jwt-authentication-for-wp-rest-api/)
 - [REST API v2.0](https://github.com/WP-API/WP-API) (Required for JWT Auth Plugin)
