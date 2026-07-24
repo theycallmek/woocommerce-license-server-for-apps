@@ -102,7 +102,7 @@ PG_DB_NAME="your_pg_db_name"
 
 ### 4. Configure .py File Constants
 
-Open `login_server.py` and update **URL** on line 34. Update it with your WordPress websites URL (https://example_wordpress_url.com/).
+Open `login_server.py` and update **URL** on line 34. Update it with your WordPress websites URL (https://example_wordpress_url.com/). Then set the FastAPI Admin Dashboard password by changing line 469 `if password == "password"` change the password in quotes to your desired password.
 
 ### 5. Initialize the Session Database
 
@@ -171,12 +171,15 @@ docker run -d --env-file .env -p 8080:8080 license-server
 
 This guide provides additional details for developers working on this middleware.
 
+### Application Requirements
+- **POST Heartbeat** To keep the license locked to the current applications session a heartbeat will be needed. Your app will need to have a heartbeat making a POST request to the FastAPI `YOUR_FASTAPI_URL/license/status` endpoint every 9 seconds with default the default 10 second cleanup to be safe (see **Setup and Configuration Notes** below to customize timing). You can see an example of making a POST request to `/license/status` in `login_client.py` starting line 95.
+
 ### Core Logic
 
 - **`login_server.py`**: This is the main FastAPI application file. It defines all API endpoints, data models (using SQLModel), and database interactions.
     - **Authentication Flow**: The `/login` endpoint takes a username and password. It first queries the WordPress MySQL database to get the user's data, including their hashed password. It then uses the `verify_pw_hash` function to securely check the provided password against the hash. If valid, it calls out to the WordPress site's JWT plugin to get an authentication token.
     - **License Management Flow**: The `/license/{action}` endpoint orchestrates license management. It first retrieves the user's license data (the `master_api_key`) from the `wp_wc_am_api_resource` table in the WordPress database. It then creates or updates a session in the local PostgreSQL database. Finally, it makes a server-to-server request to the WooCommerce API Manager endpoint on the live WordPress site to perform the requested action (`activate`, `deactivate`, or `status`).
-    - **Session Handling**: The server maintains its own session state in a PostgreSQL database (`user_sessions` table). This allows it to track which users have active license sessions. A background task (`deactivate_expired_sessions`) runs continuously to clean up sessions that have been inactive for a set period, automatically deactivating the license on the WordPress side.
+    - **Session Handling**: The server maintains its own session state in a PostgreSQL database (`user_sessions` table). This allows it to track which users have active license sessions. A background task (`deactivate_expired_sessions`) runs continuously to clean up sessions that have been inactive for a set period, automatically deactivating the license on the WordPress side. See **Setup and Configuration Notes** below to customize timing.
     - **Testing WordPress Configuration**: `login_server.py` can also be used to test your WordPress Configuration. To make sure the plugins are all functioning properly and you can communicate with the WordPress server properly. To do so, edit `login_server.py` starting on line 976 update **USERNAME** and **PASSWORD** with a user/pass that has been registered on your WordPress website. Finally, run `python login_server.py` and the console will show the response from the server.
 
 - **`login_client.py`**: This is a simple Python client script that demonstrates how to interact with the FastAPI server. It shows the full authentication and license activation/status check cycle. It's useful for testing the server endpoints locally. To use it, Update **USERNAME** and **PASSWORD** and run the file `python login_client.py`.
@@ -190,6 +193,7 @@ The application uses `SQLModel` for ORM capabilities.
 
 ### Setup and Configuration Notes
 
+- **Change Expired Session Timing** The default time to cleanup and deactivate a license that is inactive in 10 seconds. You can customize the expired session clean up time in `login_server.py` at line 747 `UserSession.last_access < datetime.now() - timedelta(seconds=10)`.
 - **Password Hashing**: The `verify_pw_hash` function is critical. It correctly handles the modern `$wp$` bcrypt hashes used by recent WordPress versions. This requires the `bcrypt` and `passlib` libraries.
-- **Environment Variables**: The use of a `.env` file is crucial for security. Never hard-code credentials in the source code. The `dotenv` library loads these variables at startup.
+- **Environment Variables**: The use of a `.env` file is crucial for security. The `dotenv` library loads these variables at startup.
 - **Asynchronous Operations**: The server uses `asyncio` and `asyncpg` for non-blocking database calls to the PostgreSQL session database, ensuring high performance. Interactions with the WordPress MySQL database are synchronous as `mysql-connector-python` does not have mature `asyncio` support.
